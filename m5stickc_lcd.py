@@ -77,7 +77,8 @@ class ST7735(framebuf.FrameBuffer):
                 polarity=0, phase=0, bits=8, firstbit=SPI.MSB,
                 sck=Pin(13), mosi=Pin(15))
 
-        self.enable_lcd_power()
+        self.m5_i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
+        self.adjust_lcd_power(255)
 
         self.rst.on()
         time.sleep_ms(5)
@@ -92,18 +93,15 @@ class ST7735(framebuf.FrameBuffer):
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self.init_display()
 
-    def enable_lcd_power(self):
-        i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
-        i2c.writeto_mem(0x34, 0x28, b'\xff')
-        axp192_reg12 = i2c.readfrom_mem(0x34, 0x12, 1)[0]
+    def adjust_lcd_power(self, brightness):
+        self.m5_i2c.writeto_mem(0x34, 0x28, brightness.to_bytes(1,'big'))
+        axp192_reg12 = self.m5_i2c.readfrom_mem(0x34, 0x12, 1)[0]
         axp192_reg12 |= 0x0c
-        i2c.writeto_mem(0x34, 0x12, bytes([axp192_reg12]))
+        self.m5_i2c.writeto_mem(0x34, 0x12, bytes([axp192_reg12]))
 
     def init_display(self):
 
-        #Orientation control
-        # see ST7735s_v1.1.pdf documentation on MADCTL MX
-        # will need to adjust CMD_CASET and CMD_RASET params as well
+        # Controls lcd screen orientation, read ST7735 documentation on MADCTL configuration
         madctl_params = 0b10100000
 
         for cmd, data, delay in [
@@ -137,13 +135,19 @@ class ST7735(framebuf.FrameBuffer):
         self.fill(0)
         self.show()
 
-    def off(self):
-        self.write_cmd(self.CMD_DISPOFF)
+    def turn_off(self):
+        self.write_cmd(self.CMD_SLPIN)
+        self.adjust_lcd_power(10)
+
+    def turn_on(self):
+        self.adjust_lcd_power(255)
+        self.write_cmd(self.CMD_SLPOUT)
 
     def show(self):
         self.write_cmd(self.CMD_CASET)
         self.write_data(b'\x00\x01\x00\xA0')
         self.write_cmd(self.CMD_RASET)
+        # Not sure why RASET start position is x1a...
         self.write_data(b'\x00\x1a\x00\x69')
         self.write_cmd(self.CMD_RAMWR)
         self.write_data(self.buffer)
